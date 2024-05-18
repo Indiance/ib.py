@@ -22,39 +22,47 @@ class Filter(commands.Cog):
         """
         Delete messages that match a filter's pattern.
         """
-        # If DM, return
+        # Ignore DMs
         if message.guild is None:
             return
 
-        # If bot, return
+        # Ignore other bots
         if message.author.bot:
             return
 
         guild_data = await get_guild_data(guild_id=message.guild.id)
 
-        # If no guild data return
+        # Return if no guild data
         if not guild_data:
             return
 
-        if guild_data.filtering and guild_data.monitor_message_log_id:
-            filter_messages = await get_all_filters()
-            for filter in filter_messages:
-                match = re.search(filter.trigger, message.content, re.IGNORECASE)
+        # Return if not filtering or log channel is not set
+        if not guild_data.filtering or not guild_data.monitor_message_log_id:
+            return
 
-                if match:
-                    formatted_filter = f"{message.content[:match.start()]}**{message.content[match.start():match.end()]}**{message.content[match.end():]}"
+        filter_messages = await get_all_filters()
+        for filter in filter_messages:
+            match = re.search(filter.trigger, message.content, re.IGNORECASE)
 
-                    await log_filtered_message(guild_data.monitor_message_log_id, message, formatted_filter, filter.notify)
-                    await message.delete()
+            if not match:
+                continue
 
-                    dm_filter_message = "The following message has been flagged and deleted for potentially " \
-                            f"breaking the rules on {message.guild} (offending phrase bolded):\n\n{formatted_filter}" \
-                            + "\n\nIf you believe you haven't broken any rules, or have any other questions or concerns " \
-                            "regarding this, you can contact the staff team for clarification by DMing the ModMail bot, " \
-                            "at the top of the sidebar on the server."
+            start, end = match.span()
+            formatted_filter = f"{message.content[:start]}**{message.content[start:end]}**{message.content[end:]}"
 
-                    await message.author.send(truncate(dm_filter_message))
-                    return
+            await log_filtered_message(guild_data.monitor_message_log_id, message, formatted_filter, filter.notify)
+            await message.delete()
+
+            dm_filter_message = (
+                "The following message has been flagged and deleted for potentially "
+                f"breaking the rules on {message.guild} (offending phrase bolded):\n\n{formatted_filter}"
+                "\n\nIf you believe you haven't broken any rules, or have any other questions or concerns "
+                "regarding this, you can contact the staff team for clarification by DMing the ModMail bot, "
+                "at the top of the sidebar on the server."
+            )
+
+            await message.author.send(truncate(dm_filter_message))
+            return
 
     cog_check = cogify(staff_command())
 
