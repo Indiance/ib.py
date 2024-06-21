@@ -22,6 +22,7 @@ INITIAL_COGS = (
     'filter',
     # 'help',
     'helper',
+    'helpermessage',
     'moderation',
     'monitor',
     'public',

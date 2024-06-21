@@ -7,8 +7,8 @@ class Helper(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot        
         self.subjects = toml.load('config.toml')['subjects']
-        self.helper_ids = self.subjects.keys()
-        self.subject_channels = [self.subjects[role] for role in self.helper_ids]
+        self.subject_channels = self.subjects.keys()
+        self.helper_ids = [self.subjects[channel] for channel in self.subject_channels]
         self.ctx_menu = discord.app_commands.ContextMenu(
 			name='Toggle Pin',
 			callback=self.toggle_pin,
@@ -27,16 +27,18 @@ class Helper(commands.Cog):
     async def check_permissions(self, obj):
         user = obj.author if isinstance(obj, commands.Context) else obj.user
         channel = obj.channel.id
-        user_role_ids = [str(role.id) for role in user.roles]
-        if not any(role in self.helper_ids for role in user_role_ids):
+        user_role_ids = [role.id for role in user.roles]
+        flat_helper_ids = [role for sublist in self.helper_ids for role in sublist]
+        if not any(role in flat_helper_ids for role in user_role_ids):
             message = 'Only subject helpers can pin messages.' 
             await self.send_error(obj, message)
             return False
-        if channel not in self.subject_channels:
+        channel_list = [int(channel) for channel in list(self.subject_channels)]
+        if channel not in channel_list:
             message = 'You may only pin messages in subject channels.'
             await self.send_error(obj, message)
             return False
-        valid_channels = [self.subjects[role] for role in user_role_ids if role in self.helper_ids]
+        valid_channels = [int(channel) for channel in self.subject_channels if any(role in user_role_ids for role in self.subjects[channel])]
         if channel not in valid_channels:
             message = 'You may only pin messages in your respective subject channel.'
             await self.send_error(obj, message)
@@ -68,12 +70,6 @@ class Helper(commands.Cog):
         Update helper message based on user helper/dehelper.
         """
         ...    
-    @commands.hybrid_command()
-    async def helpermessage(self, ctx: commands.Context):
-        """
-        Send an updating list of helpers for a subject.
-        """ 
-        raise NotImplementedError('Command requires implementation and permission set-up.')
      
     @commands.hybrid_command()
     async def pin(self, ctx: commands.Context, message: discord.Message = None):
