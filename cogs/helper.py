@@ -64,13 +64,6 @@ class Helper(commands.Cog):
                 else:
                     return await interaction.response.send_message('The message could not be unpinned.', ephemeral=True)
 
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """
-        Update helper message based on user helper/dehelper.
-        """
-        ...    
-     
     @commands.hybrid_command()
     async def pin(self, ctx: commands.Context, message: discord.Message = None):
         """

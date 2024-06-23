@@ -35,6 +35,60 @@ class Helpermessage(commands.Cog):
         embed, view = await PaginationView(ctx, embeds).return_paginated_embed_view()
         await ctx.send(embed=embed, view=view)
 
+    async def embed_getter(self, edited_roles):
+        for role in edited_roles:
+            for channel, roles in self.subjects.items():
+                if isinstance(role, list):
+                    if role.id in roles:
+                        discord_channel = await self.bot.fetch_channel(int(channel))
+                        helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
+                        embed = helpermessage.embeds[0]
+                        return helpermessage, role, embed
+                elif role.id == roles:
+                        discord_channel = await self.bot.fetch_channel(int(channel))
+                        helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
+                        embed = helpermessage.embeds[0]
+                        return helpermessage, role, embed
+        return None, None, None
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """
+        Update helper message based on user helper/dehelper.
+        """
+        # checking if there has been a change in roles
+        if before.roles != after.roles: 
+            before_roles = set(before.roles)
+            after_roles = set(after.roles)
+            # checking whether roles were removed or added
+            added_roles = after_roles - before_roles
+            removed_roles = before_roles - after_roles
+            # routine that runs to add the role
+            if added_roles:
+                helpermessage, role, embed = await self.embed_getter(added_roles)
+                if helpermessage and role and embed:
+                    new_embed = discord.Embed(description=embed.description)
+                    for field in embed.fields:
+                        if field.name == f'**{role.name}**':
+                            new_embed.add_field(name=field.name, value=field.value + f'\n{after.mention}')
+                        else:
+                            new_embed.add_field(name=field.name, value=field.value)
+                    await helpermessage.edit(embed=new_embed)
+
+            # routine that runs to remove roles
+            if removed_roles:
+                helpermessage, role, embed = await self.embed_getter(removed_roles)
+                if helpermessage and role and embed:
+                    new_embed = discord.Embed(description=embed.description)
+                    for field in embed.fields:
+                        if field.name == f'**{role.name}**':
+                            members = field.value.split('\n')
+                            new_member_list = [member for member in members if member != after.mention]
+                            new_embed.add_field(name=field.name, value='\n'.join(new_member_list))
+                        else:
+                            new_embed.add_field(name=field.name, value=field.value)
+                    await helpermessage.edit(embed=new_embed)
+
     @helpermessage.command()
     async def create(self, ctx: commands.Context, channel: discord.TextChannel, helper_roles: commands.Greedy[discord.Role]):
         """
@@ -74,7 +128,7 @@ class Helpermessage(commands.Cog):
     @helpermessage.command()
     async def edit(self, ctx: commands.Context, *, content: str):
         """
-        Edit the content in the channel
+        Edit the content in the helpermessage
         """
         for channel in self.helpermessages:
             discord_channel = await self.bot.fetch_channel(channel)
