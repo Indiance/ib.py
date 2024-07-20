@@ -3,12 +3,17 @@ import toml
 from discord.ext import commands
 from utils.commands import available_subcommands
 from utils.pagination import paginated_embed_menus, PaginationView
+from db.models import HelperMessage
 
 class Helpermessage(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.data = toml.load('config.toml')
-        self.subjects = self.data['subjects']
+        self.subjects = {
+            channel: item if isinstance(item, list) else [item]
+            for channel, item in self.data['subjects'].items()
+        }
+        self.description = self.data['description']
         self.helpermessages = self.data['helpermessages']
         self.subject_channels = self.subjects.keys()
         self.helper_roles = [self.subjects[channel] for channel in self.subject_channels]
@@ -38,18 +43,11 @@ class Helpermessage(commands.Cog):
     async def embed_getter(self, edited_roles):
         for role in edited_roles:
             for channel, roles in self.subjects.items():
-                if isinstance(role, list):
-                    if role.id in roles:
-                        discord_channel = await self.bot.fetch_channel(int(channel))
-                        helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
-                        embed = helpermessage.embeds[0]
-                        return helpermessage, role, embed
-                elif role.id == roles:
-                        discord_channel = await self.bot.fetch_channel(int(channel))
-                        helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
-                        embed = helpermessage.embeds[0]
-                        return helpermessage, role, embed
-        return None, None, None
+                if role.id in roles:
+                    discord_channel = await self.bot.fetch_channel(int(channel))
+                    helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
+                    embed = helpermessage.embeds[0]
+                    yield helpermessage, role, embed
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
@@ -57,7 +55,7 @@ class Helpermessage(commands.Cog):
         Update helper message based on user helper/dehelper.
         """
         # checking if there has been a change in roles
-        if before.roles != after.roles: 
+        if before.roles != after.roles:
             before_roles = set(before.roles)
             after_roles = set(after.roles)
             # checking whether roles were removed or added
@@ -65,8 +63,7 @@ class Helpermessage(commands.Cog):
             removed_roles = before_roles - after_roles
             # routine that runs to add the role
             if added_roles:
-                helpermessage, role, embed = await self.embed_getter(added_roles)
-                if helpermessage and role and embed:
+                async for helpermessage, role, embed in self.embed_getter(added_roles):
                     new_embed = discord.Embed(description=embed.description)
                     for field in embed.fields:
                         if field.name == f'**{role.name}**':
@@ -77,8 +74,7 @@ class Helpermessage(commands.Cog):
 
             # routine that runs to remove roles
             if removed_roles:
-                helpermessage, role, embed = await self.embed_getter(removed_roles)
-                if helpermessage and role and embed:
+                async for helpermessage, role, embed in self.embed_getter(removed_roles):
                     new_embed = discord.Embed(description=embed.description)
                     for field in embed.fields:
                         if field.name == f'**{role.name}**':
@@ -95,7 +91,7 @@ class Helpermessage(commands.Cog):
         Create the helpermessage embed for a specific channel given the channel and helper role
         """
         # Create the embed that will be pinned in the message
-        description = f"***What are 'subject helpers'?*** \n\n Subject helpers, or simply \"helpers\", are members who volunteer their time and expertise to help fellow members with certain subjects. You can contact the Helpers for this subject by tagging the respective Helper role. Please wait 15 minutes after your question is posted before doing so, though. Most channels & helpers are fairly active anyway, so you should see your question(s) answered before then, whether by a helper or someone else.\n\n***How do I become a Helper?***\nTo apply to become a Helper, please fill out this form: <https://cutt.ly/ibo-subject-helper-form>\n\nYour application will be reviewed by the Helper Managers. Once a decision's been made, you'll be notified via DMs. \n\n **Subject helpers for {channel.name}:**"
+        description = self.description['description'] + f"\n\n **Subject helpers for {channel.name}:**"
         helper_embed = discord.Embed(description=description)
         # add the field displaying the helpers
         for role in helper_roles:
@@ -109,32 +105,41 @@ class Helpermessage(commands.Cog):
         helpermessage = await channel.send(embed=helper_embed)
         # pin the message
         await helpermessage.pin()
-        # save the message id of the helpermessage to the helpermessages section
-        # of the config.toml file
-        self.helpermessages[str(channel.id)] = helpermessage.id
-        with open('config.toml', 'w') as file:
-            toml.dump(self.data, file)
+        # save to the database
+        values = dict(
+            message_id = helpermessage.id,
+            channel_id = channel.id,
+            role_id = [role.id for role in helper_roles]
+        )
+        helpermessage = await HelperMessage.create(**values)
 
     @helpermessage.command()
     async def delete(self, ctx: commands.Context, channel: discord.TextChannel):
         """
         Delete the helpermessage embed for a specific channel given the channel and helper role
         """
-        try:
-            helpermessage = int(self.helpermessages[str(channel.id)])
-        except KeyError:
-            await ctx.send("That helpermessage does not exist")
+        helpermessage = await HelperMessage.get_or_none(channel_id = channel.id)
+        if not helpermessage:
+            await ctx.send("The helpermessage does not exist!")
+            return
+        discord_channel = await self.bot.fetch_channel(helpermessage.channel_id)
+        discord_message = await discord_channel.fetch_message(helpermessage.message_id)
+        await discord_message.delete()
+        await helpermessage.delete()
+        await ctx.send("The helpermessage has been successfully deleted!")
+
 
     @helpermessage.command()
     async def edit(self, ctx: commands.Context, *, content: str):
         """
         Edit the content in the helpermessage
         """
+        self.description['description'] = content
         for channel in self.helpermessages:
             discord_channel = await self.bot.fetch_channel(channel)
             helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
             embed = helpermessage.embeds[0]
-            embed.description = content
+            embed.description = content + f"\n\n **Subject helpers for {discord_channel.name}:**"
             await helpermessage.edit(embed=embed)
         await ctx.send("Updated messages successfully")
 
