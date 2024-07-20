@@ -6,7 +6,6 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG) # TODO: change back to logging.info
 
-
 class Roles(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
