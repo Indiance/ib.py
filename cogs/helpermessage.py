@@ -32,7 +32,7 @@ class Helpermessage(commands.Cog):
         """
         embed_dict = dict(
             title = 'List of all active helpermessages',
-            description = f'Here is a list of all active helpermessages.',
+            description = 'Here is a list of all active helpermessages.',
         )
         names = [f'<#{channel}>' for channel in self.helpermessages.keys()]
         values = [f'https://discord.com/channels/{ctx.guild.id}/{channel}/{int(self.helpermessages[channel])}' for channel in self.helpermessages.keys()]
