@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import toml
+from typing import Union
 
 
 class Helper(commands.Cog):
@@ -8,6 +9,7 @@ class Helper(commands.Cog):
         self.bot = bot        
         self.subjects = toml.load('config.toml')['subjects']
         self.subject_channels = self.subjects.keys()
+        # Ensure that each entry in self.subjects is a list of roles, even if it contains just one role
         self.helper_ids = [self.subjects[channel] for channel in self.subject_channels]
         self.ctx_menu = discord.app_commands.ContextMenu(
             name="Toggle Pin",
@@ -18,28 +20,28 @@ class Helper(commands.Cog):
     async def cog_unload(self) -> None:
         self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
 
-    async def send_error(self, obj, message):
+    async def send_error(self, obj: Union[discord.Interaction, commands.Context], message):
         if isinstance(obj, commands.Context):
             return await obj.send(message)
         else:
             return await obj.response.send_message(message, ephemeral=True)
 
-    async def check_permissions(self, obj):
+    async def check_permissions(self, obj: Union[discord.Interaction, commands.Context]):
         user = obj.author if isinstance(obj, commands.Context) else obj.user
-        channel = obj.channel.id
+        channel_id = obj.channel.id
         user_role_ids = [role.id for role in user.roles]
         flat_helper_ids = [role for sublist in self.helper_ids for role in sublist]
         if not any(role in flat_helper_ids for role in user_role_ids):
-            message = 'Only subject helpers can pin messages.' 
+            message = 'Only subject helpers can pin messages.'
             await self.send_error(obj, message)
             return False
         channel_list = [int(channel) for channel in list(self.subject_channels)]
-        if channel not in channel_list:
+        if channel_id not in channel_list:
             message = 'You may only pin messages in subject channels.'
             await self.send_error(obj, message)
             return False
-        valid_channels = [int(channel) for channel in self.subject_channels if any(role in user_role_ids for role in self.subjects[channel])]
-        if channel not in valid_channels:
+        valid_roles = [self.subjects[str(channel_id)]]
+        if not any(role in user_role_ids for role in valid_roles):
             message = "You may only pin messages in your respective subject channel."
             await self.send_error(obj, message)
             return False
@@ -78,26 +80,13 @@ class Helper(commands.Cog):
                         "The message could not be unpinned.", ephemeral=True
                     )
 
-
-    @commands.Cog.listener()
-    async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """
-        Update helper message based on user helper/dehelper.
-        """
-        ...
-
-    @commands.hybrid_command()
-    async def helpermessage(self, ctx: commands.Context):
-        """
-        Send an updating list of helpers for a subject.
-        """
-        raise NotImplementedError("Command requires implementation and permission set-up.")
-        
     @commands.hybrid_command()
     async def pin(self, ctx: commands.Context, message: discord.Message = None):
         """
         Pin a message to a channel.
         """
+        if message == None:
+            return await ctx.send("No message has been provided to pin.")
         if await self.check_permissions(ctx):
             if message.pinned:
                 return await ctx.send("The message is already pinned.")
@@ -120,6 +109,8 @@ class Helper(commands.Cog):
         """
         Unpin a message from a channel.
         """
+        if message == None:
+            await ctx.send("No message has been provided to unpin.")
         if await self.check_permissions(ctx):
             if not message.pinned:
                 return await ctx.send("The message is already unpinned.")

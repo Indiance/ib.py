@@ -4,19 +4,15 @@ from discord.ext import commands
 from utils.commands import available_subcommands
 from utils.pagination import paginated_embed_menus, PaginationView
 from db.models import HelperMessage
+from typing import AsyncGenerator, Set, Tuple
 
 class Helpermessage(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
         self.data = toml.load('config.toml')
-        self.subjects = {
-            channel: item if isinstance(item, list) else [item]
-            for channel, item in self.data['subjects'].items()
-        }
+        self.subjects = self.data['subjects']
         self.description = self.data['description']
-        self.helpermessages = self.data['helpermessages']
-        self.subject_channels = self.subjects.keys()
-        self.helper_roles = [self.subjects[channel] for channel in self.subject_channels]
+        self.helper_roles = [self.subjects[channel] for channel in self.subjects.keys()]
 
     @commands.hybrid_group()
     async def helpermessage(self, ctx: commands.Context):
@@ -34,18 +30,20 @@ class Helpermessage(commands.Cog):
             title = 'List of all active helpermessages',
             description = 'Here is a list of all active helpermessages.',
         )
-        names = [f'<#{channel}>' for channel in self.helpermessages.keys()]
-        values = [f'https://discord.com/channels/{ctx.guild.id}/{channel}/{int(self.helpermessages[channel])}' for channel in self.helpermessages.keys()]
+        channel_ids = await HelperMessage.all().values_list('channel_id', flat=True)
+        helpermessage_ids = await HelperMessage.all().values_list('message_id', flat=True)
+        names = [f'<#{channel}>' for channel in channel_ids]
+        values = [f'https://discord.com/channels/{ctx.guild.id}/{channel}/{helpermessage}' for channel, helpermessage in zip(channel_ids, helpermessage_ids)]
         embeds = paginated_embed_menus(names, values, embed_dict=embed_dict)
         embed, view = await PaginationView(ctx, embeds).return_paginated_embed_view()
         await ctx.send(embed=embed, view=view)
 
-    async def embed_getter(self, edited_roles):
+    async def embed_getter(self, edited_roles: Set[discord.Role]) -> AsyncGenerator[Tuple[discord.Message, discord.Role, discord.Embed], None]:
         for role in edited_roles:
             for channel, roles in self.subjects.items():
                 if role.id in roles:
                     discord_channel = await self.bot.fetch_channel(int(channel))
-                    helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
+                    helpermessage = await discord_channel.fetch_message(HelperMessage.get(channel_id=discord_channel.id))
                     embed = helpermessage.embeds[0]
                     yield helpermessage, role, embed
 
@@ -112,6 +110,7 @@ class Helpermessage(commands.Cog):
             role_id = [role.id for role in helper_roles]
         )
         helpermessage = await HelperMessage.create(**values)
+        await ctx.send("The helpermessage has been created!")
 
     @helpermessage.command()
     async def delete(self, ctx: commands.Context, channel: discord.TextChannel):
@@ -126,7 +125,7 @@ class Helpermessage(commands.Cog):
         discord_message = await discord_channel.fetch_message(helpermessage.message_id)
         await discord_message.delete()
         await helpermessage.delete()
-        await ctx.send("The helpermessage has been successfully deleted!")
+        await ctx.send(f"The helpermessage for the channel <#{discord_channel.id}> has been successfully deleted!")
 
 
     @helpermessage.command()
@@ -135,9 +134,10 @@ class Helpermessage(commands.Cog):
         Edit the content in the helpermessage
         """
         self.description['description'] = content
-        for channel in self.helpermessages:
-            discord_channel = await self.bot.fetch_channel(channel)
-            helpermessage = await discord_channel.fetch_message(int(self.helpermessages[channel]))
+        channel_ids = await HelperMessage.all().values_list('channel_id', flat=True)
+        for channel_id in channel_ids: 
+            discord_channel = await self.bot.fetch_channel(channel_id)
+            helpermessage = await discord_channel.fetch_message(channel_id=channel_id)
             embed = helpermessage.embeds[0]
             embed.description = content + f"\n\n **Subject helpers for {discord_channel.name}:**"
             await helpermessage.edit(embed=embed)
